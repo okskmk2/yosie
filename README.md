@@ -1,4 +1,4 @@
-# simple-idb
+# yosie
 
 > A minimal IndexedDB wrapper with TTL support and Redis-style hash operations – built for the browser.
 
@@ -19,7 +19,7 @@
 ## 📦 Installation
 
 ```bash
-npm install simple-idb
+npm install yosie
 ```
 
 ---
@@ -29,7 +29,7 @@ npm install simple-idb
 ### 1. Connect to a database and store
 
 ```ts
-import connectDB from 'simple-idb';
+import connectDB from 'yosie';
 
 const db = await connectDB('my-database');
 const store = await db.connectStore('my-store');
