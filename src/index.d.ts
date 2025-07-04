@@ -14,4 +14,4 @@ export interface DBConnection {
     connectStore(storeName: string): Promise<Store>;
 }
 
-export default function connectDB(dbName: string): Promise<DBConnection>;
+export function connectDB(dbName: string): Promise<DBConnection>;
