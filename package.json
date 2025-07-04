@@ -1,0 +1,22 @@
+{
+  "name": "yosie",
+  "version": "1.0.0",
+  "description": "A lightweight IndexedDB wrapper with TTL and hash-based operations.",
+  "type": "module",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "scripts": {
+    "test": "echo \"No tests yet\""
+  },
+  "keywords": [
+    "indexeddb",
+    "storage",
+    "browser",
+    "ttl",
+    "cache",
+    "hset",
+    "idb"
+  ],
+  "author": "Eunsung Lee",
+  "license": "MIT"
+}
