@@ -2,7 +2,7 @@
 
 > A minimal IndexedDB wrapper with TTL support and Redis-style hash operations – built for the browser.
 
-**simple-idb** is a lightweight and developer-friendly wrapper around IndexedDB that enables key-value storage, automatic expiration with TTL, and convenient hash-like operations such as `hset`, `hget`, and `hdel`.
+**yosie** is a lightweight and developer-friendly wrapper around IndexedDB that enables key-value storage, automatic expiration with TTL, and convenient hash-like operations such as `hset`, `hget`, and `hdel`.
 
 ---
 
@@ -99,7 +99,7 @@ Connects to the given object store. If it doesn’t exist, it will be created au
 
 ## 📐 TypeScript Support
 
-`simple-idb` includes full type definitions. Example:
+`yosie` includes full type definitions. Example:
 
 ```ts
 const user = await store.get<{ name: string }>('user');
