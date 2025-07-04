@@ -125,3 +125,40 @@ Author: Eunsung Lee
 ## 🤝 Contributing
 
 Pull requests are welcome! If you have suggestions or improvements, feel free to open an issue or submit a PR.
+
+---
+
+## 🌐 Example: Using yosie via CDN in a Web Page
+
+You can use `yosie` directly in a browser using a CDN like jsDelivr:
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Yosie Example</title>
+</head>
+<body>
+  <script type="module">
+    import { connectDB } from 'https://cdn.jsdelivr.net/npm/yosie/+esm';
+    (async () => {
+      const db = await connectDB('MyDB');
+      const store = await db.connectStore('MyStore');
+
+      await store.set('key1', 'hello world', { ttlMs: 3000 });
+      await store.set('key2', 'hello231 world', { ttlMs: 3000 });
+
+      const value1 = await store.get('key1');
+      console.log(value1); // "hello world" or undefined if expired
+
+      const value2 = await store.getAll();
+      console.log(value2); // Array of all non-expired values
+    })();
+  </script>
+</body>
+</html>
+```
+
+This approach is useful for quick demos, JSFiddle/CodePen, or CDN-based web apps.
