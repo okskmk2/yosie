@@ -2,11 +2,11 @@
   "name": "yosie",
   "version": "1.0.0",
   "description": "A lightweight IndexedDB wrapper with TTL and hash-based operations.",
-  "type": "module",
   "main": "src/index.js",
   "types": "src/index.d.ts",
-  "scripts": {
-    "test": "echo \"No tests yet\""
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/okskmk2/yosie.git"
   },
   "keywords": [
     "indexeddb",
@@ -18,5 +18,9 @@
     "idb"
   ],
   "author": "Eunsung Lee",
-  "license": "MIT"
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/okskmk2/yosie/issues"
+  },
+  "homepage": "https://github.com/okskmk2/yosie#readme"
 }
