@@ -65,22 +65,30 @@ function createStore(db, storeName) {
             });
         },
 
-        async set(key, value, config = {}) {
-            const { ttlMs } = config;
-            const data = {
-                value,
-                ...(ttlMs ? { expiresAt: Date.now() + ttlMs } : {})
-            };
+async set(key, value, config = {}) {
+    const { ttlMs, expiresAt } = config;
+    let finalExpiresAt;
 
-            return new Promise((resolve, reject) => {
-                const tx = db.transaction([storeName], 'readwrite');
-                const store = tx.objectStore(storeName);
-                const req = store.put(data, key);
+    if (expiresAt !== undefined) {
+        finalExpiresAt = expiresAt; // 직접 지정한 expiresAt이 우선
+    } else if (ttlMs !== undefined) {
+        finalExpiresAt = Date.now() + ttlMs;
+    }
 
-                req.onsuccess = () => resolve();
-                req.onerror = () => reject(req.error);
-            });
-        },
+    const data = {
+        value,
+        ...(finalExpiresAt !== undefined ? { expiresAt: finalExpiresAt } : {})
+    };
+
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction([storeName], 'readwrite');
+        const store = tx.objectStore(storeName);
+        const req = store.put(data, key);
+
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+    });
+}
 
         async del(key) {
             return new Promise((resolve, reject) => {
