@@ -29,7 +29,7 @@ npm install yosie
 ### 1. Connect to a database and store
 
 ```ts
-import connectDB from 'yosie';
+import {connectDB} from 'yosie';
 
 const db = await connectDB('my-database');
 const store = await db.connectStore('my-store');
