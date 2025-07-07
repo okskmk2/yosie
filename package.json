@@ -1,6 +1,6 @@
 {
   "name": "yosie",
-  "version": "1.0.3",
+  "version": "1.0.5",
   "description": "A lightweight IndexedDB wrapper with TTL and hash-based operations.",
   "type": "module",
   "main": "src/index.js",
