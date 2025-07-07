@@ -88,7 +88,7 @@ async set(key, value, config = {}) {
         req.onsuccess = () => resolve();
         req.onerror = () => reject(req.error);
     });
-}
+},
 
         async del(key) {
             return new Promise((resolve, reject) => {
