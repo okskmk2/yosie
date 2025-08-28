@@ -1,164 +1,74 @@
-# yosie
+# IndexedDB TTL Store
 
-> A minimal IndexedDB wrapper with TTL support and Redis-style hash operations – built for the browser.
+A lightweight wrapper for IndexedDB that provides a Redis-like key-value API with TTL (time-to-live) support.
 
-**yosie** is a lightweight and developer-friendly wrapper around IndexedDB that enables key-value storage, automatic expiration with TTL, and convenient hash-like operations such as `hset`, `hget`, and `hdel`.
+## Features
 
----
+- Key-value storage with **expiration (TTL)**
+- Redis-like commands: `get`, `set`, `del`, `keys`, `ttl`, `getAll`, `delAll`
+- Hash-like methods: `hget`, `hset`, `hdel`
+- Automatic object store creation if missing
+- TypeScript support (`index.d.ts` included)
 
-## ✨ Features
-
-- ✅ Easy key-value storage in the browser
-- ⏳ Built-in TTL (Time-To-Live) expiration support
-- 🧩 Hash-style operations (`hget`, `hset`, `hdel`)
-- 🧹 Utility methods for working with keys and values (`getAll`, `keys`, `clear`)
-- 🦺 TypeScript support with included type definitions
-
----
-
-## 📦 Installation
+## Installation
 
 ```bash
 npm install yosie
 ```
 
----
-
-## 🚀 Quick Start
-
-### 1. Connect to a database and store
+## Usage
 
 ```ts
-import {connectDB} from 'yosie';
+import { connectDB } from "yosie";
 
-const db = await connectDB('my-database');
-const store = await db.connectStore('my-store');
+async function demo() {
+  // Connect to a database
+  const db = await connectDB("mydb");
+
+  // Connect to a store (auto-creates if missing)
+  const store = await db.connectStore("mystore");
+
+  // Set with TTL of 10 seconds
+  await store.set("foo", "bar", { ttl: 10 });
+
+  // Get value
+  const val = await store.get("foo"); // "bar"
+
+  // TTL check
+  const ttl = await store.ttl("foo"); // e.g., 8 (seconds left)
+
+  // Delete key
+  await store.del("foo");
+}
 ```
 
-### 2. Set and get values
+## API
 
-```ts
-await store.set('username', 'Alice');
+### `connectDB(dbName: string): Promise<Database>`
+Connect (or create) an IndexedDB database.
 
-const username = await store.get('username'); // 'Alice'
-```
+### `Database.connectStore(storeName: string): Promise<Store>`
+Connect to (or create) an object store.
 
-### 3. Set with TTL (e.g., 10 seconds)
+### Store Methods
 
-```ts
-await store.set('session', { token: 'abc123' }, { ttlMs: 10_000 });
-```
+- `get(key)` → value or `undefined`
+- `set(key, value, { ttl?, expiresAt? })` → void
+  - `ttl`: seconds (≤ 0 means immediate expiration)
+  - `expiresAt`: absolute ms timestamp (takes precedence over `ttl`)
+- `del(key)` → void
+- `getAll()` → all non-expired values
+- `keys()` → all keys of non-expired values
+- `delAll()` → void
+- `hget(key, field)` → field value from stored object
+- `hset(key, field, value)` → set field in object
+- `hdel(key, field)` → delete field in object
+- `ttl(key)` → number
+  - `-2`: key does not exist
+  - `-1`: key exists but has no expiration
+  - `0`: key expired
+  - `> 0`: seconds remaining
 
-### 4. Work with hash-style values
+## License
 
-```ts
-await store.hset('user', 'name', 'Alice');
-await store.hset('user', 'age', 30);
-
-const name = await store.hget('user', 'name'); // 'Alice'
-await store.hdel('user', 'age');
-```
-
-### 5. Utility functions
-
-```ts
-const keys = await store.keys();     // ['username', 'session', ...]
-const values = await store.getAll(); // All valid (non-expired) values
-
-await store.del('username');         // Delete a key
-await store.delAll();                // Clear all data from the store
-```
-
----
-
-## 🧩 API Reference
-
-### `connectDB(dbName: string): Promise<DBConnection>`
-Creates or opens the IndexedDB database with the given name.
-
-### `DBConnection.connectStore(storeName: string): Promise<Store>`
-Connects to the given object store. If it doesn’t exist, it will be created automatically.
-
----
-
-### `Store` Methods
-
-| Method                    | Description                                                         |
-|---------------------------|---------------------------------------------------------------------|
-| `get(key)`                | Retrieves the value associated with the given key                  |
-| `set(key, value, config)` | Stores a value with optional TTL (`{ ttlMs: number }`)             |
-| `del(key)`                | Deletes a specific key                                              |
-| `getAll()`                | Returns all valid (non-expired) values in the store                |
-| `keys()`                  | Returns all valid keys                                              |
-| `delAll()`                | Clears the entire store                                             |
-| `hget(key, field)`        | Gets a specific field from a stored object                          |
-| `hset(key, field, value)` | Sets a specific field in a stored object                            |
-| `hdel(key, field)`        | Deletes a specific field from a stored object                       |
-
----
-
-## 📐 TypeScript Support
-
-`yosie` includes full type definitions. Example:
-
-```ts
-const user = await store.get<{ name: string }>('user');
-console.log(user?.name); // Type-safe access
-```
-
----
-
-## 🧪 Testing
-
-> Coming soon: Tests will be added using Jest or Vitest.
-
----
-
-## 📄 License
-
-MIT License  
-Copyright © 2025  
-Author: Eunsung Lee
-
----
-
-## 🤝 Contributing
-
-Pull requests are welcome! If you have suggestions or improvements, feel free to open an issue or submit a PR.
-
----
-
-## 🌐 Example: Using yosie via CDN in a Web Page
-
-You can use `yosie` directly in a browser using a CDN like jsDelivr:
-
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Yosie Example</title>
-</head>
-<body>
-  <script type="module">
-    import { connectDB } from 'https://cdn.jsdelivr.net/npm/yosie/+esm';
-    (async () => {
-      const db = await connectDB('MyDB');
-      const store = await db.connectStore('MyStore');
-
-      await store.set('key1', 'hello world', { ttlMs: 3000 });
-      await store.set('key2', 'hello231 world', { ttlMs: 3000 });
-
-      const value1 = await store.get('key1');
-      console.log(value1); // "hello world" or undefined if expired
-
-      const value2 = await store.getAll();
-      console.log(value2); // Array of all non-expired values
-    })();
-  </script>
-</body>
-</html>
-```
-
-This approach is useful for quick demos, JSFiddle/CodePen, or CDN-based web apps.
+MIT

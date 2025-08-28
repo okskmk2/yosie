@@ -66,13 +66,15 @@ function createStore(db, storeName) {
     },
 
     async set(key, value, config = {}) {
-      const { ttlMs, expiresAt } = config;
+      const { ttl, expiresAt } = config;
       let finalExpiresAt;
 
       if (expiresAt !== undefined) {
-        finalExpiresAt = expiresAt; // 직접 지정한 expiresAt이 우선
-      } else if (ttlMs !== undefined) {
-        finalExpiresAt = Date.now() + ttlMs;
+        // 직접 지정된 만료 시간 (ms 단위 timestamp)이 최우선
+        finalExpiresAt = expiresAt;
+      } else if (ttl !== undefined) {
+        // ttl 은 "초 단위" → ms 변환
+        finalExpiresAt = Date.now() + ttl * 1000;
       }
 
       const data = {
@@ -235,6 +237,30 @@ function createStore(db, storeName) {
         };
 
         getReq.onerror = () => reject(getReq.error);
+      });
+    },
+
+    async ttl(key) {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction([storeName], "readonly");
+        const store = tx.objectStore(storeName);
+        const req = store.get(key);
+
+        req.onsuccess = () => {
+          const doc = req.result;
+          if (!doc) return resolve(-2); // 존재하지 않음
+
+          const { expiresAt } = doc;
+          if (!expiresAt) return resolve(-1); // 만료시간 없음(영구 저장)
+
+          const now = Date.now();
+          if (now >= expiresAt) return resolve(0); // 만료됨
+
+          const seconds = Math.ceil((expiresAt - now) / 1000);
+          resolve(seconds);
+        };
+
+        req.onerror = () => reject(req.error);
       });
     },
   };

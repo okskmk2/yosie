@@ -1,13 +1,13 @@
 {
   "name": "yosie",
-  "version": "1.0.5",
+  "version": "2.0.1",
   "description": "A lightweight IndexedDB wrapper with TTL and hash-based operations.",
   "type": "module",
   "main": "src/index.js",
   "types": "src/index.d.ts",
   "repository": {
     "type": "git",
-    "url": "https://github.com/okskmk2/yosie.git"
+    "url": "git+https://github.com/okskmk2/yosie.git"
   },
   "keywords": [
     "indexeddb",
