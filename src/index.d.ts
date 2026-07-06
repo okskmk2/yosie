@@ -5,7 +5,7 @@ export interface SetOptions {
   /**
    * Time-to-live in seconds.
    * - If `expiresAt` is provided, it takes precedence over `ttl`.
-   * - If `ttl <= 0`, the key is considered immediately expired (stored with `expiresAt = Date.now()`).
+   * - If `ttl <= 0`, the key is considered immediately expired.
    */
   ttl?: number;
 
@@ -16,6 +16,20 @@ export interface SetOptions {
   expiresAt?: number;
 }
 
+/** Options for connecting to a store. */
+export interface StoreOptions {
+  /**
+   * Enable periodic automatic deletion of expired entries.
+   * - `true`: sweep every 60 seconds (default interval)
+   * - `{ interval: n }`: sweep every `n` seconds
+   *
+   * A sweep also runs immediately when the store is connected.
+   * In multi-tab environments, the Web Locks API (when available)
+   * ensures only one tab performs the sweep at a time.
+   */
+  autoCleanup?: boolean | { interval?: number };
+}
+
 /**
  * A typed interface for an IndexedDB-backed key-value store.
  * Use the generic parameter `T` to define the value type stored in this object store.
@@ -23,7 +37,8 @@ export interface SetOptions {
 export interface Store<T = any> {
   /**
    * Get a value by key. Returns `undefined` if the key does not exist
-   * or is expired at read time.
+   * or is expired at read time. Reading an expired key also physically
+   * deletes it in the background (lazy deletion).
    */
   get(key: IDBValidKey): Promise<T | undefined>;
 
@@ -38,14 +53,10 @@ export interface Store<T = any> {
   /** Delete a single key. */
   del(key: IDBValidKey): Promise<void>;
 
-  /**
-   * Get all **non-expired** values.
-   */
+  /** Get all **non-expired** values. */
   getAll(): Promise<T[]>;
 
-  /**
-   * Get all keys for **non-expired** entries, returned as strings.
-   */
+  /** Get all keys for **non-expired** entries, returned as strings. */
   keys(): Promise<string[]>;
 
   /** Delete all entries in the store. */
@@ -86,10 +97,29 @@ export interface Store<T = any> {
    * Returns:
    * - `-2` if the key does not exist,
    * - `-1` if the key exists but has **no expiration**,
-   * - `0` if the key is **expired**,
+   * - `0` if the key is **expired** (the key is also lazily deleted),
    * - a positive number for the remaining seconds otherwise (rounded up).
    */
   ttl(key: IDBValidKey): Promise<number>;
+
+  /**
+   * Immediately delete all expired entries (active expiration).
+   * Uses the `expiresAt` index, so cost is proportional to the number
+   * of expired records only — no full scan.
+   * @returns the number of deleted records
+   */
+  cleanupExpired(): Promise<number>;
+
+  /**
+   * Start periodic automatic cleanup. Runs one sweep immediately,
+   * then repeats every `intervalSec` seconds.
+   * Calling it again replaces the existing timer.
+   * @param intervalSec sweep interval in seconds (default: 60)
+   */
+  startAutoCleanup(intervalSec?: number): void;
+
+  /** Stop the automatic cleanup timer. */
+  stopAutoCleanup(): void;
 }
 
 /**
@@ -97,10 +127,14 @@ export interface Store<T = any> {
  */
 export interface Database {
   /**
-   * Connect to (and lazily create) an object store. If the store does not exist,
-   * the database version is bumped and the store is created automatically.
+   * Connect to (and lazily create) an object store. If the store or its
+   * `expiresAt` index does not exist, the database version is bumped and
+   * they are created automatically (existing v2 stores are migrated).
    */
-  connectStore<T = any>(storeName: string): Promise<Store<T> | Store<T>>;
+  connectStore<T = any>(
+    storeName: string,
+    options?: StoreOptions
+  ): Promise<Store<T>>;
 }
 
 /**
@@ -111,8 +145,4 @@ export interface Database {
  */
 export function connectDB(dbName: string): Promise<Database>;
 
-/**
- * Re-export the `IDBValidKey` type so consumers don't need DOM lib types explicitly.
- * If your consumers already have DOM lib, this is redundant but harmless.
- */
 export type { IDBValidKey };

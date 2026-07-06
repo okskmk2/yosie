@@ -1,3 +1,5 @@
+const EXPIRES_INDEX = "expiresAt";
+
 export function connectDB(dbName) {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(dbName);
@@ -7,9 +9,15 @@ export function connectDB(dbName) {
     };
 
     request.onsuccess = () => {
-      const db = request.result;
+      // 커넥션을 공유 가변 상태로 관리:
+      // store 생성/인덱스 추가로 버전 업그레이드가 일어나면 state.db가 교체되고,
+      // 모든 store 메서드는 호출 시점의 최신 커넥션을 사용한다.
+      const state = { db: request.result, closed: false };
+      attachVersionChange(state);
+
       resolve({
-        connectStore: (storeName) => connectStore(dbName, db, storeName),
+        connectStore: (storeName, options) =>
+          connectStore(dbName, state, storeName, options),
       });
     };
 
@@ -17,36 +25,160 @@ export function connectDB(dbName) {
   });
 }
 
-function connectStore(dbName, db, storeName) {
-  if (!db.objectStoreNames.contains(storeName)) {
-    db.close();
-    const version = db.version + 1;
+/** 다른 탭의 버전 업그레이드를 블로킹하지 않도록 커넥션을 양보 */
+function attachVersionChange(state) {
+  state.db.onversionchange = () => {
+    state.db.close();
+    state.closed = true;
+  };
+}
 
+/** 현재 커넥션 반환. 닫혀 있으면 재연결 */
+function getDb(dbName, state) {
+  if (state.db && !state.closed) {
+    return Promise.resolve(state.db);
+  }
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(dbName);
+    request.onsuccess = () => {
+      state.db = request.result;
+      state.closed = false;
+      attachVersionChange(state);
+      resolve(state.db);
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function connectStore(dbName, state, storeName, options = {}) {
+  const db = await getDb(dbName, state);
+
+  const hasStore = db.objectStoreNames.contains(storeName);
+  const hasIndex =
+    hasStore &&
+    db
+      .transaction([storeName], "readonly")
+      .objectStore(storeName)
+      .indexNames.contains(EXPIRES_INDEX);
+
+  // store와 expiresAt 인덱스가 모두 있으면 그대로 사용
+  if (hasStore && hasIndex) {
+    return createStore(dbName, state, storeName, options);
+  }
+
+  // store가 없거나, (구버전에서 생성되어) 인덱스가 없으면 버전 업그레이드
+  const version = db.version + 1;
+  db.close();
+  state.closed = true;
+
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(dbName, version);
+
+    request.onupgradeneeded = (event) => {
+      const upgradedDb = event.target.result;
+      let store;
+      if (!upgradedDb.objectStoreNames.contains(storeName)) {
+        store = upgradedDb.createObjectStore(storeName);
+      } else {
+        // 기존 store에 인덱스만 추가 (upgrade transaction 사용)
+        store = event.target.transaction.objectStore(storeName);
+      }
+      if (!store.indexNames.contains(EXPIRES_INDEX)) {
+        // expiresAt이 없는 레코드(영구 저장)는 인덱스에 포함되지 않음
+        store.createIndex(EXPIRES_INDEX, "expiresAt");
+      }
+    };
+
+    request.onsuccess = () => {
+      state.db = request.result;
+      state.closed = false;
+      attachVersionChange(state);
+      resolve(createStore(dbName, state, storeName, options));
+    };
+
+    request.onerror = () => reject(request.error);
+    request.onblocked = () =>
+      console.warn(
+        `[yosie] upgrade blocked: 다른 탭이 "${dbName}"을 사용 중입니다.`
+      );
+  });
+}
+
+function createStore(dbName, state, storeName, options = {}) {
+  let cleanupTimer = null;
+
+  const db = () => getDb(dbName, state);
+
+  /** 만료된 레코드를 실제로 삭제. 삭제된 개수를 반환 */
+  async function sweep() {
+    const conn = await db();
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(dbName, version);
-
-      request.onupgradeneeded = (event) => {
-        const upgradedDb = event.target.result;
-        upgradedDb.createObjectStore(storeName);
-      };
+      const tx = conn.transaction([storeName], "readwrite");
+      const index = tx.objectStore(storeName).index(EXPIRES_INDEX);
+      // expiresAt <= now 인 레코드만 커서로 순회 → 전체 스캔 없음
+      const range = IDBKeyRange.upperBound(Date.now());
+      const request = index.openCursor(range);
+      let deleted = 0;
 
       request.onsuccess = (event) => {
-        const upgradedDb = event.target.result;
-        resolve(createStore(upgradedDb, storeName));
+        const cursor = event.target.result;
+        if (cursor) {
+          cursor.delete();
+          deleted++;
+          cursor.continue();
+        }
       };
 
+      tx.oncomplete = () => resolve(deleted);
+      tx.onerror = () => reject(tx.error);
       request.onerror = () => reject(request.error);
     });
   }
 
-  return Promise.resolve(createStore(db, storeName));
-}
+  /**
+   * 멀티탭 환경에서 동시에 sweep이 돌지 않도록 Web Locks로 조정.
+   * (sweep 자체는 멱등이므로 락 없이 중복 실행돼도 안전 — 최적화 목적)
+   */
+  function sweepCoordinated() {
+    const lockName = `yosie:${dbName}:${storeName}:cleanup`;
+    if (typeof navigator !== "undefined" && navigator.locks?.request) {
+      return navigator.locks.request(
+        lockName,
+        { ifAvailable: true },
+        async (lock) => {
+          if (!lock) return 0; // 다른 탭이 청소 중
+          return sweep();
+        }
+      );
+    }
+    return sweep();
+  }
 
-function createStore(db, storeName) {
-  return {
+  /** get/ttl에서 만료를 발견했을 때 비동기로 삭제 (lazy deletion) */
+  async function lazyDelete(key) {
+    try {
+      const conn = await db();
+      const tx = conn.transaction([storeName], "readwrite");
+      const store = tx.objectStore(storeName);
+      const getReq = store.get(key);
+      getReq.onsuccess = () => {
+        const doc = getReq.result;
+        // 삭제 직전에 재확인: 그 사이 같은 키가 새 값으로 덮어써졌을 수 있음
+        if (doc && doc.expiresAt && Date.now() > doc.expiresAt) {
+          store.delete(key);
+        }
+      };
+      tx.onerror = () => {};
+    } catch (_) {
+      // lazy 삭제 실패는 무시 — 다음 sweep에서 정리됨
+    }
+  }
+
+  const storeApi = {
     async get(key) {
+      const conn = await db();
       return new Promise((resolve, reject) => {
-        const tx = db.transaction([storeName], "readonly");
+        const tx = conn.transaction([storeName], "readonly");
         const store = tx.objectStore(storeName);
         const req = store.get(key);
 
@@ -56,6 +188,7 @@ function createStore(db, storeName) {
 
           const { value, expiresAt } = result;
           if (expiresAt && Date.now() > expiresAt) {
+            lazyDelete(key); // 만료 발견 → 즉시 물리 삭제 예약
             return resolve(undefined);
           }
           resolve(value);
@@ -82,8 +215,9 @@ function createStore(db, storeName) {
         ...(finalExpiresAt !== undefined ? { expiresAt: finalExpiresAt } : {}),
       };
 
+      const conn = await db();
       return new Promise((resolve, reject) => {
-        const tx = db.transaction([storeName], "readwrite");
+        const tx = conn.transaction([storeName], "readwrite");
         const store = tx.objectStore(storeName);
         const req = store.put(data, key);
 
@@ -93,8 +227,9 @@ function createStore(db, storeName) {
     },
 
     async del(key) {
+      const conn = await db();
       return new Promise((resolve, reject) => {
-        const tx = db.transaction([storeName], "readwrite");
+        const tx = conn.transaction([storeName], "readwrite");
         const store = tx.objectStore(storeName);
         const req = store.delete(key);
 
@@ -104,8 +239,9 @@ function createStore(db, storeName) {
     },
 
     async getAll() {
+      const conn = await db();
       return new Promise((resolve, reject) => {
-        const tx = db.transaction([storeName], "readonly");
+        const tx = conn.transaction([storeName], "readonly");
         const store = tx.objectStore(storeName);
         const request = store.openCursor();
         const results = [];
@@ -128,8 +264,9 @@ function createStore(db, storeName) {
     },
 
     async keys() {
+      const conn = await db();
       return new Promise((resolve, reject) => {
-        const tx = db.transaction([storeName], "readonly");
+        const tx = conn.transaction([storeName], "readonly");
         const store = tx.objectStore(storeName);
         const request = store.openCursor();
         const keys = [];
@@ -152,8 +289,9 @@ function createStore(db, storeName) {
     },
 
     async delAll() {
+      const conn = await db();
       return new Promise((resolve, reject) => {
-        const tx = db.transaction([storeName], "readwrite");
+        const tx = conn.transaction([storeName], "readwrite");
         const store = tx.objectStore(storeName);
         const req = store.clear();
 
@@ -171,7 +309,8 @@ function createStore(db, storeName) {
     },
 
     async hset(key, field, fieldValue) {
-      const tx = db.transaction([storeName], "readwrite");
+      const conn = await db();
+      const tx = conn.transaction([storeName], "readwrite");
       const store = tx.objectStore(storeName);
 
       return new Promise((resolve, reject) => {
@@ -204,7 +343,8 @@ function createStore(db, storeName) {
     },
 
     async hdel(key, field) {
-      const tx = db.transaction([storeName], "readwrite");
+      const conn = await db();
+      const tx = conn.transaction([storeName], "readwrite");
       const store = tx.objectStore(storeName);
 
       return new Promise((resolve, reject) => {
@@ -241,8 +381,9 @@ function createStore(db, storeName) {
     },
 
     async ttl(key) {
+      const conn = await db();
       return new Promise((resolve, reject) => {
-        const tx = db.transaction([storeName], "readonly");
+        const tx = conn.transaction([storeName], "readonly");
         const store = tx.objectStore(storeName);
         const req = store.get(key);
 
@@ -254,7 +395,10 @@ function createStore(db, storeName) {
           if (!expiresAt) return resolve(-1); // 만료시간 없음(영구 저장)
 
           const now = Date.now();
-          if (now >= expiresAt) return resolve(0); // 만료됨
+          if (now >= expiresAt) {
+            lazyDelete(key); // 만료 발견 → 즉시 물리 삭제 예약
+            return resolve(0); // 만료됨
+          }
 
           const seconds = Math.ceil((expiresAt - now) / 1000);
           resolve(seconds);
@@ -263,5 +407,51 @@ function createStore(db, storeName) {
         req.onerror = () => reject(req.error);
       });
     },
+
+    /**
+     * 만료된 레코드를 즉시 전부 삭제 (active expiration).
+     * expiresAt 인덱스를 사용하므로 만료된 레코드 수에만 비례하는 비용.
+     * @returns 삭제된 레코드 수
+     */
+    async cleanupExpired() {
+      return sweepCoordinated();
+    },
+
+    /**
+     * 주기적 자동 청소 시작. 시작 즉시 1회 sweep 후 intervalSec마다 반복.
+     * 이미 실행 중이면 기존 타이머를 교체.
+     * @param intervalSec 청소 주기(초). 기본 60초
+     */
+    startAutoCleanup(intervalSec = 60) {
+      this.stopAutoCleanup();
+      sweepCoordinated().catch(() => {});
+      cleanupTimer = setInterval(() => {
+        sweepCoordinated().catch(() => {});
+      }, intervalSec * 1000);
+      // Node/테스트 환경에서 프로세스 종료를 막지 않도록
+      if (cleanupTimer && typeof cleanupTimer.unref === "function") {
+        cleanupTimer.unref();
+      }
+    },
+
+    /** 자동 청소 중지 */
+    stopAutoCleanup() {
+      if (cleanupTimer !== null) {
+        clearInterval(cleanupTimer);
+        cleanupTimer = null;
+      }
+    },
   };
+
+  // connectStore 옵션으로 자동 청소 활성화
+  // { autoCleanup: true } 또는 { autoCleanup: { interval: 30 } }
+  if (options.autoCleanup) {
+    const interval =
+      typeof options.autoCleanup === "object"
+        ? options.autoCleanup.interval
+        : undefined;
+    storeApi.startAutoCleanup(interval);
+  }
+
+  return storeApi;
 }
